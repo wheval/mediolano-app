@@ -12,13 +12,14 @@ import {
     Fingerprint,
     Lock,
     AlertTriangle,
+    Flame,
 } from "lucide-react"
 import { useState } from "react"
 import { motion, AnimatePresence } from "framer-motion"
 
 interface ProvenanceEvent {
     id: string
-    type: "mint" | "transfer" | "license" | "modification" | "verification" | "dispute"
+    type: "mint" | "transfer" | "burn" | "license" | "modification" | "verification" | "dispute"
     title: string
     description: string
     from?: string
@@ -54,6 +55,8 @@ export function SimpleProvenance({ events, compact = false }: SimpleProvenancePr
                 return <Zap className="h-4 w-4" />
             case "transfer":
                 return <ArrowRight className="h-4 w-4" />
+            case "burn":
+                return <Flame className="h-4 w-4" />
             case "license":
                 return <Lock className="h-4 w-4" />
             case "modification":
@@ -71,6 +74,7 @@ export function SimpleProvenance({ events, compact = false }: SimpleProvenancePr
         switch (type) {
             case "mint": return "bg-blue-100 text-blue-600 dark:bg-blue-900/40 dark:text-blue-400 border-blue-200 dark:border-blue-800"
             case "transfer": return "bg-emerald-100 text-emerald-600 dark:bg-emerald-900/40 dark:text-emerald-400 border-emerald-200 dark:border-emerald-800"
+            case "burn": return "bg-red-100 text-red-600 dark:bg-red-900/40 dark:text-red-400 border-red-200 dark:border-red-800"
             case "license": return "bg-purple-100 text-purple-600 dark:bg-purple-900/40 dark:text-purple-400 border-purple-200 dark:border-purple-800"
             default: return "bg-gray-100 text-gray-600 dark:bg-gray-800 dark:text-gray-400 border-gray-200 dark:border-gray-700"
         }
@@ -93,6 +97,15 @@ export function SimpleProvenance({ events, compact = false }: SimpleProvenancePr
     const truncateAddress = (address: string) => {
         if (!address) return "0x00...0000"
         return `${address.substring(0, 6)}...${address.substring(address.length - 4)}`
+    }
+
+    const isZeroAddress = (address?: string) => {
+        if (!address) return false
+        try {
+            return BigInt(address) === 0n
+        } catch {
+            return false
+        }
     }
 
     if (events.length === 0) {
@@ -128,6 +141,11 @@ export function SimpleProvenance({ events, compact = false }: SimpleProvenancePr
                                                 Genesis
                                             </Badge>
                                         )}
+                                        {event.type === "burn" && (
+                                            <Badge variant="secondary" className="text-[10px] h-5 px-1.5 font-normal bg-red-50 text-red-700 dark:bg-red-900/30 dark:text-red-300">
+                                                Burned
+                                            </Badge>
+                                        )}
                                     </div>
                                     <span className="text-xs text-muted-foreground font-mono">{formatDate(event.timestamp)}</span>
                                 </div>
@@ -143,7 +161,7 @@ export function SimpleProvenance({ events, compact = false }: SimpleProvenancePr
                                     <div className="flex items-center">
                                         <span className="w-8">To:</span>
                                         <span className="text-foreground/80 truncate max-w-[100px] sm:max-w-none">
-                                            {event.to ? truncateAddress(event.to) : "Unknown"}
+                                            {event.to && !isZeroAddress(event.to) ? truncateAddress(event.to) : "Null Address"}
                                         </span>
                                     </div>
                                 </div>

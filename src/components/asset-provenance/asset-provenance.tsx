@@ -27,6 +27,7 @@ import {
   Users,
   Activity,
   User,
+  Flame,
 } from "lucide-react"
 import { useState } from "react"
 import { AddressLink } from "@/components/ui/address-link"
@@ -38,7 +39,7 @@ import Link from "next/link"
 
 interface ProvenanceEvent {
   id: string
-  type: "mint" | "transfer" | "license" | "modification" | "verification" | "dispute"
+  type: "mint" | "transfer" | "burn" | "license" | "modification" | "verification" | "dispute"
   title: string
   description: string
   from?: string
@@ -126,6 +127,8 @@ export function AssetProvenance({ asset, events, showActions = true, compact = f
         return <Zap className="h-5 w-5" />
       case "transfer":
         return <ArrowRight className="h-5 w-5" />
+      case "burn":
+        return <Flame className="h-5 w-5" />
       case "license":
         return <Lock className="h-5 w-5" />
       case "modification":
@@ -143,6 +146,7 @@ export function AssetProvenance({ asset, events, showActions = true, compact = f
     switch (type) {
       case "mint": return "from-blue-500 to-indigo-600 dark:from-blue-600 dark:to-indigo-700 shadow-blue-500/10"
       case "transfer": return "from-emerald-500 to-teal-600 dark:from-emerald-600 dark:to-teal-700 shadow-emerald-500/10"
+      case "burn": return "from-red-500 to-orange-600 dark:from-red-600 dark:to-orange-700 shadow-red-500/10"
       case "license": return "from-purple-500 to-pink-600 dark:from-purple-600 dark:to-pink-700 shadow-purple-500/10"
       case "verification": return "from-cyan-500 to-blue-600 shadow-cyan-500/20"
       default: return "from-orange-500 to-red-600 dark:from-orange-600 dark:to-red-700 shadow-orange-500/10"
@@ -166,6 +170,15 @@ export function AssetProvenance({ asset, events, showActions = true, compact = f
   const truncateAddress = (address: string) => {
     if (!address) return "0x00...0000"
     return `${address.substring(0, 6)}...${address.substring(address.length - 4)}`
+  }
+
+  const isZeroAddress = (address?: string) => {
+    if (!address) return false
+    try {
+      return BigInt(address) === 0n
+    } catch {
+      return false
+    }
   }
 
   const displayEvents = showAllEvents ? events : events.slice(0, 5)
@@ -316,6 +329,11 @@ export function AssetProvenance({ asset, events, showActions = true, compact = f
                               Genesis
                             </Badge>
                           )}
+                          {event.type === "burn" && (
+                            <Badge className="bg-red-500/10 text-red-600 dark:text-red-400 border-red-500/20 text-[10px] px-1.5 py-0">
+                              Burned
+                            </Badge>
+                          )}
                         </div>
                         <p className="text-xs text-muted-foreground">{formatDate(event.timestamp)}</p>
                       </div>
@@ -361,10 +379,10 @@ export function AssetProvenance({ asset, events, showActions = true, compact = f
 
                       <div className="flex items-center gap-2 min-w-0">
                         <div className="w-7 h-7 rounded-xl bg-primary/10 flex items-center justify-center text-[10px] font-medium text-primary shrink-0">
-                          {event.to ? event.to.substring(2, 4).toUpperCase() : "??"}
+                          {event.to && !isZeroAddress(event.to) ? event.to.substring(2, 4).toUpperCase() : "Ø"}
                         </div>
                         <span className="font-mono text-xs text-foreground/80 truncate">
-                          {truncateAddress(event.to || "0x0")}
+                          {event.to && !isZeroAddress(event.to) ? truncateAddress(event.to) : "Burned"}
                         </span>
                       </div>
                     </div>

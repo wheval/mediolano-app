@@ -162,7 +162,12 @@ export function useAssetTransferEvents(contractAddress: string, tokenId: string)
 // Event selectors from the registry contract
 const REGISTRY_TOKEN_MINTED_SELECTOR = "0x3e517dedbc7bae62d4ace7e3dfd33255c4a7fe7c1c6f53c725d52b45f9c5a00";
 const REGISTRY_TOKEN_TRANSFERRED_SELECTOR = "0x3ddaa3f2d17cc7984d82075aa171282e6fff4db61944bf218f60678f95e2567";
+// starknet_keccak("TokenBurned"), i.e. getSelectorFromName("TokenBurned").
+// Matches the same naming convention as the TokenMinted selector above.
+const REGISTRY_TOKEN_BURNED_SELECTOR = "0x37b5cae185bad45bdffdf8924b8f53beecf44e4e934870b2b65e36ac9d9d5f8";
 const STANDARD_TRANSFER_SELECTOR = "0x99cd8bde557814842a3121e8ddfd433a539b8c9f14bf31ebf108d12e6196e9";
+// Fully-qualified zero address (custody genesis for mints / terminus for burns)
+const ZERO_ADDRESS = "0x0000000000000000000000000000000000000000000000000000000000000000";
 const RPC_URL = process.env.NEXT_PUBLIC_RPC_URL;
 
 /**
@@ -254,7 +259,8 @@ export function useAssetProvenanceEvents(contractAddress: string, tokenId: strin
             to_block: "latest",
             keys: [[
               REGISTRY_TOKEN_MINTED_SELECTOR,
-              REGISTRY_TOKEN_TRANSFERRED_SELECTOR
+              REGISTRY_TOKEN_TRANSFERRED_SELECTOR,
+              REGISTRY_TOKEN_BURNED_SELECTOR
             ]],
             chunk_size: 1000,
             continuation_token: continuationToken
@@ -336,7 +342,7 @@ export function useAssetProvenanceEvents(contractAddress: string, tokenId: strin
         const txHash = normalizeStarknetAddress(event.transaction_hash);
 
         let match = false;
-        let type: "mint" | "transfer" = "transfer";
+        let type: "mint" | "transfer" | "burn" = "transfer";
         let from = "0x0";
         let to = "Unknown";
         let source: 'registry' | 'contract' = 'contract'; // Initialize source
@@ -381,6 +387,25 @@ export function useAssetProvenanceEvents(contractAddress: string, tokenId: strin
             }
           }
         }
+        // Handle Registry TokenBurned
+        else if (eventSelector === REGISTRY_TOKEN_BURNED_SELECTOR && data.length >= 5) {
+          source = 'registry';
+          const eventCollectionId = BigInt(data[0]) + (BigInt(data[1]) << 128n);
+
+          if (eventCollectionId === targetCollectionId) {
+            const tokenLow = BigInt(data[2]);
+            const tokenHigh = BigInt(data[3]);
+            const eventTokenId = tokenLow + (tokenHigh << 128n);
+            const targetTokenId = BigInt(tokenId);
+
+            if (eventTokenId === targetTokenId) {
+              match = true;
+              type = "burn";
+              from = data[4]; // operator/owner that burned the token
+              to = "0x0"; // token destroyed -> custody terminates at the zero address
+            }
+          }
+        }
         // Handle Standard Transfer (from the asset contract itself)
         else if (eventSelector === STANDARD_TRANSFER_SELECTOR && keys.length >= 4) {
           source = 'contract';
@@ -395,15 +420,20 @@ export function useAssetProvenanceEvents(contractAddress: string, tokenId: strin
               const sender = normalizeStarknetAddress(keys[1]);
               const receiver = normalizeStarknetAddress(keys[2]);
 
-              // Check for Mint (from 0x0)
-              if (sender === "0x0" || sender === "0x0000000000000000000000000000000000000000000000000000000000000000") {
+              // Check for Mint (from 0x0) or Burn (to 0x0)
+              if (sender === "0x0" || sender === ZERO_ADDRESS) {
                 type = "mint";
                 from = "0x0";
+                to = receiver;
+              } else if (receiver === "0x0" || receiver === ZERO_ADDRESS) {
+                type = "burn";
+                from = sender;
+                to = "0x0";
               } else {
                 type = "transfer";
                 from = sender;
+                to = receiver;
               }
-              to = receiver;
             }
           } catch (e) {
             console.warn(`[Provenance] Error parsing contract Transfer event keys for token ID: ${e}`);
@@ -436,16 +466,15 @@ export function useAssetProvenanceEvents(contractAddress: string, tokenId: strin
 
       // Third pass: Select best event per transaction and assemble final events
       for (const [txHash, txEvents] of eventsByTx.entries()) {
-        // Priority: Mint (from registry) > Transfer (from registry) > Transfer (from contract)
+        // Priority within a single transaction:
+        // Genesis/terminal lifecycle events (mint, burn) outrank plain transfers,
+        // and for events of the same kind we trust the registry over the raw contract event.
+        const typeRank = (t: string) => (t === "mint" ? 0 : t === "burn" ? 1 : 2);
         txEvents.sort((a, b) => {
-          if (a.type === "mint" && b.type !== "mint") return -1;
-          if (a.type !== "mint" && b.type === "mint") return 1;
-          // Both are transfers, prioritize registry over contract (IF and ONLY IF we trust registry)
-          // Since we strictly filter registry now, we trust it.
-          if (a.type === "transfer" && b.type === "transfer") {
-            if (a.source === 'registry' && b.source === 'contract') return -1;
-            if (a.source === 'contract' && b.source === 'registry') return 1;
-          }
+          const rankDiff = typeRank(a.type) - typeRank(b.type);
+          if (rankDiff !== 0) return rankDiff;
+          if (a.source === 'registry' && b.source === 'contract') return -1;
+          if (a.source === 'contract' && b.source === 'registry') return 1;
           return 0;
         });
 
@@ -464,8 +493,13 @@ export function useAssetProvenanceEvents(contractAddress: string, tokenId: strin
         processedEvents.push({
           id: txHash,
           type,
-          title: type === "mint" ? "Asset Minted" : "Asset Transferred",
-          description: type === "mint" ? `Programmable IP minted (Source: ${source})` : `Ownership transferred on-chain (Source: ${source})`,
+          title: type === "mint" ? "Asset Minted" : type === "burn" ? "Asset Burned" : "Asset Transferred",
+          description:
+            type === "mint"
+              ? `Programmable IP minted (Source: ${source})`
+              : type === "burn"
+                ? `Programmable IP burned (Source: ${source})`
+                : `Ownership transferred on-chain (Source: ${source})`,
           from: normalizeStarknetAddress(from),
           to: normalizeStarknetAddress(to),
           timestamp,

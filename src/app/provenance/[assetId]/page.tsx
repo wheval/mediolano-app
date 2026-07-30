@@ -46,18 +46,28 @@ export default function ProvenancePage({ params }: ProvenancePageProps) {
     if (!provenanceEventsRaw || provenanceEventsRaw.length === 0) return []
 
     return provenanceEventsRaw.map((event) => {
-      const isMint = event.type === "mint"
+      const eventType = event.type === "mint" ? "mint" : event.type === "burn" ? "burn" : "transfer"
       const from = event.from || "0x0"
       const to = event.to || "Unknown"
       const timestamp = event.timestamp ? new Date(event.timestamp) : new Date();
 
+      const shortFrom = `${from.substring(0, 6)}...${from.substring(from.length - 4)}`
+      const shortTo = `${to.substring(0, 6)}...${to.substring(to.length - 4)}`
+
+      const defaultTitle =
+        eventType === "mint" ? "Asset Minted" : eventType === "burn" ? "Asset Burned" : "Ownership Transferred"
+      const defaultDescription =
+        eventType === "mint"
+          ? `Asset minted by ${shortTo}`
+          : eventType === "burn"
+            ? `Asset burned by ${shortFrom}`
+            : `Transferred from ${shortFrom} to ${shortTo}`
+
       return {
         id: event.id,
-        type: isMint ? "mint" : "transfer",
-        title: event.title || (isMint ? "Asset Minted" : "Ownership Transferred"),
-        description: event.description || (isMint
-          ? `Asset minted by ${to.substring(0, 6)}...${to.substring(to.length - 4)}`
-          : `Transferred from ${from.substring(0, 6)}...${from.substring(from.length - 4)} to ${to.substring(0, 6)}...${to.substring(to.length - 4)}`),
+        type: eventType,
+        title: event.title || defaultTitle,
+        description: event.description || defaultDescription,
         from,
         to,
         date: timestamp.toLocaleDateString(),
